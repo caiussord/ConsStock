@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ConsStock.Application.Stock;
@@ -54,17 +55,43 @@ public sealed class InventoryFlowTests
     {
         var connection = Environment.GetEnvironmentVariable("TEST_DATABASE_CONNECTION")
             ?? throw new InvalidOperationException("Configure TEST_DATABASE_CONNECTION para os testes de integração.");
+        var adminEmail = "admin-" + Guid.NewGuid().ToString("N") + "@consstock.test";
+        const string adminPassword = "IntegrationTest123!";
         await using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) =>
             {
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:DefaultConnection"] = connection,
-                    ["Database:ApplyMigrations"] = "true"
+                    ["Database:ApplyMigrations"] = "true",
+                    ["Jwt:Issuer"] = "ConsStock.Tests",
+                    ["Jwt:Audience"] = "ConsStock.Tests.Client",
+                    ["Jwt:Key"] = new string('x', 48),
+                    ["Bootstrap:AdminEmail"] = adminEmail,
+                    ["Bootstrap:AdminPassword"] = adminPassword
                 });
             }));
         using var client = factory.CreateClient();
         var suffix = Guid.NewGuid().ToString("N");
+
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/v1/products")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid-token");
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.GetAsync("/api/v1/products")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = null;
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await client.PostAsJsonAsync("/api/v1/auth/login", new
+            {
+                email = adminEmail, password = "wrong"
+            })).StatusCode);
+        var login = await client.PostAsJsonAsync("/api/v1/auth/login", new
+        {
+            email = adminEmail, password = adminPassword
+        });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var adminToken = (await Read(login)).GetProperty("accessToken").GetString();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
 
         var categoryResponse = await client.PostAsJsonAsync("/api/v1/categories", new
         {
@@ -116,12 +143,64 @@ public sealed class InventoryFlowTests
         Assert.Equal(6, adjusted.GetProperty("newBalance").GetInt32());
         var filtered = await Read(await client.GetAsync($"/api/v1/products?search={suffix}&pageSize=1"));
         Assert.Equal(1, filtered.GetProperty("total").GetInt32());
+
+        var operatorEmail = "operator-" + suffix + "@consstock.test";
+        var createdUser = await client.PostAsJsonAsync("/api/v1/auth/users", new
+        {
+            email = operatorEmail, password = "OperatorTest123!", role = "Operator"
+        });
+        Assert.Equal(HttpStatusCode.Created, createdUser.StatusCode);
+        var operatorId = (await Read(createdUser)).GetProperty("id").GetGuid();
+        using var operatorClient = factory.CreateClient();
+        var operatorLogin = await operatorClient.PostAsJsonAsync("/api/v1/auth/login", new
+        {
+            email = operatorEmail, password = "OperatorTest123!"
+        });
+        Assert.Equal(HttpStatusCode.OK, operatorLogin.StatusCode);
+        operatorClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            (await Read(operatorLogin)).GetProperty("accessToken").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await operatorClient.GetAsync("/api/v1/products")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await operatorClient.PostAsJsonAsync("/api/v1/categories", new { name = "Forbidden" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await operatorClient.PostAsJsonAsync("/api/v1/auth/users", new
+            {
+                email = "forbidden@consstock.test", password = "OperatorTest123!", role = "Admin"
+            })).StatusCode);
+        var operatorMovement = await Move(operatorClient, productId, "Entry", 1);
+        Assert.Equal(HttpStatusCode.Created, operatorMovement.StatusCode);
+        Assert.Equal(operatorId.ToString(), (await Read(operatorMovement)).GetProperty("createdByUserId").GetString());
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var wrongPassword = await client.PostAsJsonAsync("/api/v1/auth/login", new
+            {
+                email = operatorEmail, password = "wrong"
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, wrongPassword.StatusCode);
+        }
+        var locked = await client.PostAsJsonAsync("/api/v1/auth/login", new
+        {
+            email = operatorEmail, password = "OperatorTest123!"
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, locked.StatusCode);
+
+        var loginStatuses = new List<HttpStatusCode>();
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            var response = await client.PostAsJsonAsync("/api/v1/auth/login", new
+            {
+                email = "unknown@consstock.test", password = "wrong"
+            });
+            loginStatuses.Add(response.StatusCode);
+        }
+        Assert.Contains(HttpStatusCode.TooManyRequests, loginStatuses);
     }
 
     private static Task<HttpResponseMessage> Move(HttpClient client, Guid productId, string type, int quantity)
         => client.PostAsJsonAsync("/api/v1/stock/movements", new
         {
-            productId, type, quantity, reason = "Integration test", createdByUserId = "test-operator"
+            productId, type, quantity, reason = "Integration test", createdByUserId = "spoofed-client-value"
         });
 
     private static async Task<JsonElement> Read(HttpResponseMessage response)

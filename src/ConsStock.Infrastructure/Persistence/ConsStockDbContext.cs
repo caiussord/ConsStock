@@ -1,9 +1,12 @@
 using ConsStock.Domain.Entities;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace ConsStock.Infrastructure.Persistence;
 
-public class ConsStockDbContext(DbContextOptions<ConsStockDbContext> options) : DbContext(options)
+public class ConsStockDbContext(DbContextOptions<ConsStockDbContext> options)
+    : IdentityDbContext<IdentityUser<Guid>, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
@@ -12,6 +15,7 @@ public class ConsStockDbContext(DbContextOptions<ConsStockDbContext> options) : 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
         modelBuilder.Entity<Category>(entity =>
         {
             entity.HasKey(x => x.Id);

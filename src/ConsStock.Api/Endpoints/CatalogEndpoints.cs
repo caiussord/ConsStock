@@ -10,16 +10,16 @@ public static class CatalogEndpoints
 {
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder app)
     {
-        var categories = app.MapGroup("/api/v1/categories").WithTags("Categories");
+        var categories = app.MapGroup("/api/v1/categories").WithTags("Categories").RequireAuthorization();
         categories.MapGet("/", ListCategories);
         categories.MapGet("/{id:guid}", GetCategory);
-        categories.MapPost("/", CreateCategory);
+        categories.MapPost("/", CreateCategory).RequireAuthorization("Admin");
 
-        var products = app.MapGroup("/api/v1/products").WithTags("Products");
+        var products = app.MapGroup("/api/v1/products").WithTags("Products").RequireAuthorization();
         products.MapGet("/", ListProducts);
         products.MapGet("/{id:guid}", GetProduct);
-        products.MapPost("/", CreateProduct);
-        products.MapPut("/{id:guid}", UpdateProduct);
+        products.MapPost("/", CreateProduct).RequireAuthorization("Admin");
+        products.MapPut("/{id:guid}", UpdateProduct).RequireAuthorization("Admin");
         return app;
     }
 

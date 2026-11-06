@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using ConsStock.Application.Stock;
 using ConsStock.Domain.Enums;
 using ConsStock.Infrastructure.Persistence;
@@ -9,11 +10,11 @@ public static class StockEndpoints
 {
     public static IEndpointRouteBuilder MapStockEndpoints(this IEndpointRouteBuilder app)
     {
-        var stock = app.MapGroup("/api/v1/stock").WithTags("Stock");
+        var stock = app.MapGroup("/api/v1/stock").WithTags("Stock").RequireAuthorization();
         stock.MapGet("/", ListBalances);
         stock.MapGet("/low", ListLowStock);
         stock.MapGet("/movements", ListMovements);
-        stock.MapPost("/movements", CreateMovement);
+        stock.MapPost("/movements", CreateMovement).RequireAuthorization("StockWrite");
         return app;
     }
 
@@ -68,9 +69,12 @@ public static class StockEndpoints
         return Results.Ok(new { items, page, pageSize, total });
     }
 
-    private static async Task<IResult> CreateMovement(CreateMovement request,
-        IStockMovementService service, CancellationToken ct)
+    private static async Task<IResult> CreateMovement(StockMovementInput input,
+        IStockMovementService service, ClaimsPrincipal user, CancellationToken ct)
     {
+        var actor = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (actor is null) return Results.Unauthorized();
+        var request = new CreateMovement(input.ProductId, input.Type, input.Quantity, input.Reason, actor);
         var movement = await service.CreateAsync(request, ct);
         return Results.Created($"/api/v1/stock/movements?productId={movement.ProductId}", new
         {
@@ -80,3 +84,5 @@ public static class StockEndpoints
         });
     }
 }
+
+public sealed record StockMovementInput(Guid ProductId, MovementType Type, int Quantity, string Reason);

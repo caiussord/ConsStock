@@ -15,7 +15,10 @@ public sealed class HealthEndpointTests
                 {
                     ["ConnectionStrings:DefaultConnection"] =
                         "Host=localhost;Database=consstock_tests;Username=test;Password=test",
-                    ["Database:ApplyMigrations"] = "false"
+                    ["Database:ApplyMigrations"] = "false",
+                    ["Jwt:Issuer"] = "ConsStock.Tests",
+                    ["Jwt:Audience"] = "ConsStock.Tests.Client",
+                    ["Jwt:Key"] = new string('x', 48)
                 });
             }));
         using var client = factory.CreateClient();

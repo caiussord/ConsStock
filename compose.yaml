@@ -20,6 +20,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: Host=db;Port=5432;Database=consstock;Username=consstock;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       Database__ApplyMigrations: "true"
+      Jwt__Issuer: ConsStock
+      Jwt__Audience: ConsStock.Client
+      Jwt__Key: ${JWT_KEY:?Set JWT_KEY in .env}
+      Bootstrap__AdminEmail: ${BOOTSTRAP_ADMIN_EMAIL:?Set BOOTSTRAP_ADMIN_EMAIL in .env}
+      Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
